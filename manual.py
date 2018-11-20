@@ -5,28 +5,34 @@ from .models import *
 
 
 def datascrapping():
-    df = pandas.read_excel("/home/amit/Downloads/evaluation_register_RAIPUR.xlsx", sheetname='AUG 2018')
+    df = pandas.read_excel("/home/amit/Downloads/Evaluation_Register_April_to_July.xlsx", sheetname="July'18")
     exceldata = df.to_dict(orient='records')
     mldata = {'E-Class':25000,'A Class':17500,'CLA Class':17500,'GLA Class':17500,'B-Class':12500, 'C-Class':20000}
     for i in exceldata:
         eval_date = evaldateclean(i['Date'])
-        print("DATAPASSEDBY FUnction",i['Make'],i['Model'])
+        print("DATAPASSEDBY FUnction",i['Make'],i['Model'],   eval_date)
         model = identifymodel(i['Make'],i['Model'])
         variant = identifyvariant(i['Make'],i['Model'])
         make = identifymake(i['Make'],i['Model'])
         print("DATA rETurn",model)
-        print("erv",i['Price offered'])
-        if variant and model:
+        print("DATA rETurn Variant",variant)
+        print("DATA rETurn make", make)
+        print("price offered",i['Price offered'])
+        if variant and model and isinstance(i['Price offered'], int):
             eval_date = eval_date.replace(tzinfo=pytz.UTC)
             i['created'] = eval_date
-            i['Kms Driven'] = i['Kilometers']
+            i['Kms Driven'] = i['KM']
             i['Make'] = make.name
             i['Model'] = model.name
-            i['Variant'] = variant.name
+            i['Variant'] = variant
+            print("Year",i['Y.O.M'])
             i['MFG Year'] = i['Y.O.M']
-            print(i)
+            try:
+                i['MFG Year'] = int(i['Y.O.M'])
+            except Exception as e:
+                i['MFG Year'] = i['Y.O.M'].year 
             i['Trade-In Price'] = i['Price offered']
-            car_already_exists = UsedCarDetail.objects.filter(source__name="Autohangar", year__name=int(i['Y.O.M']),model=model,make=make,variant=variant)      
+            car_already_exists = UsedCarDetail.objects.filter(source__name="Autohangar", year__name=i['MFG Year'],model=model,make=make,variant=variant)      
             print(car_already_exists)
             if not car_already_exists:
                 print("CAR NOT Existed Already")
@@ -34,16 +40,16 @@ def datascrapping():
             else:
                 print("CAR Existed")
                 print(eval_date,"jj",car_already_exists[0].created_on)
-                if (eval_date >= car_already_exists[0].created_on):
+                if (eval_date > car_already_exists[0].created_on):
                     print("wekrjn")
                     delete_old_used_car(i)
                     create_used_car(i,mldata)
         else:
-            pass
+            print("Model And Variant Not Exist in Database OR Price Not Given")
 from datetime import datetime 
 
 
-makename = {'MERC':'Mercedes-Benz'}
+makename = {'MB':'Mercedes-Benz','Mercedes Benz':'Mercedes-Benz','Audi ':'Audi', 'Mercedes- Benz':'Mercedes-Benz'}
 
 
 
@@ -53,11 +59,17 @@ def evaldateclean(date):
     try:
         return date.to_pydatetime()
     except Exception as e:
-        eval_date=datetime.strptime(date, '%d/%m/%Y')
+        try:
+            eval_date=datetime.strptime(date, '%d/%m/%Y')
+            if eval_date.month > 1:
+                eval_date=datetime.strptime(date, '%m/%d/%Y')
+            return eval_date
+        except Exception as e:
+            eval_date=datetime.strptime(date, '%d.%m.%Y')
+            return eval_date
         # if eval_date.month > 1:
         #     eval_date=datetime.strptime(date, '%m/%d/%Y')
         #     return eval_date
-        return eval_date
 
 
 def identifymodel(make, model):
@@ -68,17 +80,13 @@ def identifymodel(make, model):
         modeldata = model.split(' ')
         modelfil = Model.objects.filter(make=makefil[0], name=modeldata[0])
         if modelfil:
-            variantfil = Variant.objects.filter(make=makefil[0], name__in=modeldata[1:])
-            if variantfil:
-                print(makefil[0], modelfil[0], variantfil[0])
-                return modelfil[0]
+            print(makefil[0], modelfil[0])
+            return modelfil[0]
         else:
             modelfil = Model.objects.filter(make=makefil[0], name=modeldata[0][0]+"-Class") 
-            variantfil = Variant.objects.filter(make=makefil[0], name__icontains=model)
             if modelfil:
-                if variantfil:
-                    print(makefil[0], modelfil[0], variantfil[0])
-                    return modelfil[0]  
+                print(makefil[0], modelfil[0])
+                return modelfil[0]  
 
 def identifyvariant(make,model):
     if make in makename:
@@ -88,7 +96,9 @@ def identifyvariant(make,model):
         modeldata = model.split(' ')
         modelfil = Model.objects.filter(make=makefil[0], name=modeldata[0])
         if modelfil:
-            variantfil = Variant.objects.filter(make=makefil[0], name__in=modeldata[1:])
+            varstring = ' '.join(modeldata[1:])
+            variantfil = Variant.objects.filter(make=makefil[0], name__icontains=varstring)
+            print("test variant",makefil[0], modelfil[0], modeldata[1:])
             if variantfil:
                 print(makefil[0], modelfil[0], variantfil[0])
                 return variantfil[0]
@@ -96,8 +106,9 @@ def identifyvariant(make,model):
             modelfil = Model.objects.filter(make=makefil[0], name=modeldata[0][0]+"-Class") 
             variantfil = Variant.objects.filter(make=makefil[0], name__icontains=model)
             if variantfil:
-                return variantfil[0] 
-
+                return variantfil[0]
+    else:
+        print("MAKE NOT FOUND", make)
 
 
 def identifymake(make, model):
@@ -105,19 +116,7 @@ def identifymake(make, model):
         make = makename[make]
     makefil = Make.objects.filter(name__icontains=make)
     if makefil:
-        modeldata = model.split(' ')
-        modelfil = Model.objects.filter(make=makefil[0], name=modeldata[0])
-        if modelfil:
-            variantfil = Variant.objects.filter(make=makefil[0], name__in=modeldata[1:])
-            if variantfil:
-                print(makefil[0], modelfil[0], variantfil[0])
-                return makefil[0]
-        else:
-            modelfil = Model.objects.filter(make=makefil[0], name=modeldata[0][0]+"-Class") 
-            variantfil = Variant.objects.filter(make=makefil[0], name__icontains=model)
-            if variantfil:
-                print(makefil[0])
-                return makefil[0]
+        return makefil[0]
 
 
 
@@ -161,7 +160,7 @@ def create_used_car(i,mldata):
     year = Year.objects.get(name=int(i['MFG Year']))
     model = Model.objects.get(name=i['Model'])
     make = Make.objects.get(name=i['Make'])
-    variant = Variant.objects.get(name=i['Variant'])
+    variant = i['Variant']
     no_of_user = NoOfUser.objects.get(number=1)
     km = KilometersDriven.objects.get(from_kms__lt=i['Kms Driven'],to_kms__gte=i['Kms Driven'])
     cardekho_car= UsedCarDetail.objects.filter(source__name="Cardekho", year=year,model__name=model,make__name=make,variant=variant,kms_driven=km,no_of_users=no_of_user).first()
@@ -176,7 +175,7 @@ def create_used_car(i,mldata):
             print("sdsd",kms,used_car.good_to_price,kmcardekho_car.good_to_price,new_car.good_to_price,cardekho_car.good_to_price)
     
     else:
-        print("KIKI")
+        print("Car dekho data is not present")
         if model.name in mldata:
             print("sd")
             kmonwards = KilometersDriven.objects.filter(to_kms__gte=i['Kms Driven'])
